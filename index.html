@@ -53,10 +53,6 @@ button,select,input{font:inherit;color:inherit}
 .status.on{color:var(--ok)}
 
 .rig{display:grid;gap:16px;grid-template-columns:minmax(0,1fr) minmax(0,340px) minmax(0,1fr);align-items:start}
-@media (max-width:1180px){
-  .rig{grid-template-columns:minmax(0,1fr)}
-  .mixer{width:100%;max-width:440px;margin-inline:auto}
-}
 
 /* deck */
 .deck{background:var(--panel);background:color-mix(in srgb,var(--panel) 80%,transparent);border:1px solid var(--line);border-top:3px solid var(--c);border-radius:6px;padding:14px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0}
@@ -153,7 +149,6 @@ canvas{display:block;width:100%;min-width:0;max-width:100%}
 
 /* bottom */
 .bottom{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
-@media (max-width:900px){.bottom{grid-template-columns:minmax(0,1fr)}}
 .card{background:var(--panel);background:color-mix(in srgb,var(--panel) 80%,transparent);border:1px solid var(--line);border-radius:6px;padding:14px;min-width:0}
 .card h2{font:700 13px var(--disp);letter-spacing:.14em;margin:0 0 12px;color:var(--dim);text-transform:uppercase}
 .pads{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
@@ -269,11 +264,19 @@ kbd{font:600 11px var(--mono);background:var(--panel2);border:1px solid var(--li
 .plat.has-art .plabel{display:block}
 .plat.has-art::after{display:none}
 .lthumb{width:36px;height:36px;flex:none;border-radius:4px;border:1px solid var(--line);background:var(--panel) center/cover no-repeat}
+
+/* ================= Panggung (layar sempit) ================= */
+.stage{position:relative;width:100%}
+.app.scaled{position:absolute;left:0;top:0;width:1180px;max-width:none;transform-origin:0 0}
+.rotate-hint{display:none;margin:0 0 10px;padding:8px 10px;border:1px dashed var(--line);border-radius:6px;color:var(--dim);font:400 11px/1.4 var(--mono);text-align:center;position:relative;z-index:1}
+@media (max-width:700px) and (orientation:portrait){.rotate-hint{display:block}}
 </style>
 </head>
 <body>
 
 <canvas id="bg" class="bg" aria-hidden="true" ></canvas>
+<p class="rotate-hint">Putar HP ke mode mendatar agar tampilan lebih besar. Cubit layar untuk memperbesar.</p>
+<div class="stage" id="stage">
 <div class="app">
   <header class="top">
     <div class="brand">
@@ -320,6 +323,7 @@ kbd{font:600 11px var(--mono);background:var(--panel2);border:1px solid var(--li
       </div>
     </div>
   </section>
+</div>
 </div>
 
   
@@ -494,6 +498,9 @@ function detectBpm(buf) {
 
 
 /* ===== lib/controls.js ===== */
+// Skala panggung (tampilan HP dikecilkan). Diisi oleh engine agar geseran jari terasa sama di semua ukuran.
+const view = { scale: 1 };
+
 // Knob dan fader buatan sendiri (pointer, roda mouse, keyboard).
 /* ============ UI kecil: knob dan fader ============ */
 function knobHTML(id, label, color) {
@@ -509,7 +516,7 @@ function makeKnob(el, o) {
   };
   let sy = 0, sv = 0;
   el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); sy = e.clientY; sv = v; el.classList.add('drag'); });
-  el.addEventListener('pointermove', e => { if (el.hasPointerCapture(e.pointerId)) set(sv + (sy - e.clientY) / (e.shiftKey ? 600 : 150) * (o.max - o.min)); });
+  el.addEventListener('pointermove', e => { if (el.hasPointerCapture(e.pointerId)) set(sv + (sy - e.clientY) / view.scale / (e.shiftKey ? 600 : 150) * (o.max - o.min)); });
   const up = e => { el.classList.remove('drag'); if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId); };
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
   el.addEventListener('wheel', e => { e.preventDefault(); set(v - Math.sign(e.deltaY) * (o.max - o.min) * .04); }, { passive: false });
@@ -525,7 +532,7 @@ function makeKnob(el, o) {
 }
 function makeFader(el, o) {
   let v = o.def, min = o.min, max = o.max;
-  const vert = o.orient === 'v', cap = vert ? 26 : 34;
+  const vert = o.orient === 'v', capPx = vert ? 26 : 34;
   const set = (nv, silent) => {
     if (o.snap) nv = o.snap(nv, min, max);
     v = clamp(nv, min, max);
@@ -534,7 +541,7 @@ function makeFader(el, o) {
     if (!silent && o.onInput) o.onInput(v);
   };
   const fromPointer = e => {
-    const r = el.getBoundingClientRect();
+    const r = el.getBoundingClientRect(), cap = capPx * view.scale;
     const p = vert ? 1 - (e.clientY - r.top - cap / 2) / (r.height - cap) : (e.clientX - r.left - cap / 2) / (r.width - cap);
     set(min + clamp(p, 0, 1) * (max - min));
   };
@@ -1619,6 +1626,20 @@ function fxFrame(dt, now) {
   appEl.classList.toggle('playing', fxs.playing);
   bg.frame(dt, fxs); orb.frame(dt, fxs);
 }
+/* Panggung: di layar sempit seluruh tampilan (deck kiri, mixer, deck kanan) diperkecil utuh, bukan ditumpuk. */
+const DESIGN_W = 1180, stage = $('#stage');
+function fitStage() {
+  const w = stage.clientWidth, scaled = w < DESIGN_W, s = scaled ? w / DESIGN_W : 1;
+  view.scale = s;
+  appEl.classList.toggle('scaled', scaled);
+  appEl.style.transform = scaled ? `scale(${s})` : '';
+  stage.style.height = scaled ? Math.ceil(appEl.offsetHeight * s) + 'px' : '';
+}
+fitStage();
+const stageRO = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitStage) : null;
+if (stageRO) stageRO.observe(appEl);
+window.addEventListener('resize', fitStage);
+window.addEventListener('orientationchange', fitStage);
 let last = performance.now(), echoTick = 0, mvu = 0, mpk = 0, alive = true, raf = 0;
 function frame(now) {
   if (!alive) return;
@@ -1654,6 +1675,9 @@ return () => {
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keyup', onKeyUp);
   window.removeEventListener('resize', onResize);
+  window.removeEventListener('resize', fitStage); window.removeEventListener('orientationchange', fitStage);
+  if (stageRO) stageRO.disconnect();
+  appEl.style.transform = ''; appEl.classList.remove('scaled'); stage.style.height = ''; view.scale = 1;
   appEl.style.removeProperty('--pulse'); appEl.classList.remove('playing');
   Object.values(decks).forEach(d => d.stopSource());
   if (ctx) ctx.close().catch(() => {});
